@@ -1,16 +1,23 @@
 from flask import Blueprint, request, jsonify
+from flask_jwt_extended import (
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
+)
 from app.database import db
 from app.models import User
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
-bp = Blueprint('main', __name__)
+auth_bp = Blueprint('auth', __name__)
 
-@bp.route('/register', methods=['POST'])
+blacklisted_tokens = set()
+
+@auth_bp.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('email') or not data.get('password'):
         return jsonify({"error": "Missing fields"}), 400
-    
+
     if User.query.filter_by(email=data['email']).first():
         return jsonify({"error": "Email already in use"}), 400
 
@@ -23,7 +30,7 @@ def register():
     return jsonify({"message": "User registered successfully"}), 201
 
 
-@bp.route('/login', methods=['POST'])
+@auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     if not data or not data.get('email') or not data.get('password'):
@@ -37,7 +44,7 @@ def login():
     return jsonify({"access_token": access_token})
 
 
-@bp.route('/profile', methods=['GET'])
+@auth_bp.route('/profile', methods=['GET'])
 @jwt_required()
 def profile():
     user_id = get_jwt_identity()
@@ -51,5 +58,21 @@ def profile():
         "email": user.email
     })
 
-def init_routes(app):
-    app.register_blueprint(bp)
+
+@auth_bp.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    jti = get_jwt()["jti"]
+    blacklisted_tokens.add(jti)
+    return jsonify({"message": "Successfully logged out"}), 200
+
+
+from flask_jwt_extended import JWTManager
+
+jwt = JWTManager()
+
+@jwt.token_in_blocklist_loader
+def check_if_token_revoked(jwt_header, jwt_data):
+    jti = jwt_data["jti"]
+    return jti in blacklisted_tokens
+
